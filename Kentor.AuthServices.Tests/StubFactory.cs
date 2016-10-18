@@ -1,6 +1,7 @@
 ﻿using Kentor.AuthServices.Configuration;
 using Kentor.AuthServices.Metadata;
 using Kentor.AuthServices.Owin;
+using Kentor.AuthServices.Tests.Owin;
 using Kentor.AuthServices.WebSso;
 using System;
 using System.Collections.Generic;
@@ -134,7 +135,7 @@ namespace Kentor.AuthServices.Tests
             options.Contacts.Add(new ContactPerson(ContactType.Technical)); // Deliberately void of info.
         }
 
-        private static IOptions CreateOptions(Func<ISPOptions, IOptions> factory)
+        private static IOptions CreateOptions(Func<SPOptions, IOptions> factory)
         {
             var options = factory(CreateSPOptions());
 
@@ -149,7 +150,7 @@ namespace Kentor.AuthServices.Tests
             return (Options)CreateOptions(sp => new Options(sp));
         }
 
-        private static IOptions CreateOptionsPublicOrigin(Func<ISPOptions, IOptions> factory, Uri publicOrigin)
+        private static IOptions CreateOptionsPublicOrigin(Func<SPOptions, IOptions> factory, Uri publicOrigin)
         {
             var options = factory(CreateSPOptions(publicOrigin));
 
@@ -169,7 +170,8 @@ namespace Kentor.AuthServices.Tests
                 sp => new KentorAuthServicesAuthenticationOptions(false)
                 {
                     SPOptions = sp,
-                    SignInAsAuthenticationType = "AuthType"
+                    SignInAsAuthenticationType = "AuthType",
+                    DataProtector = new StubDataProtector()
                 });
         }
     }

@@ -4,6 +4,10 @@ using System.Security.Cryptography.Xml;
 using System.Security.Cryptography;
 using System.IdentityModel.Metadata;
 using System.IdentityModel.Tokens;
+using Kentor.AuthServices.Internal;
+using System.Reflection;
+using System.Collections.Generic;
+using System;
 
 namespace Kentor.AuthServices.Tests.Helpers
 {
@@ -13,7 +17,7 @@ namespace Kentor.AuthServices.Tests.Helpers
 
         public static readonly X509Certificate2 TestCert2 = new X509Certificate2("Kentor.AuthServices.Tests2.pfx");
 
-        public static readonly X509Certificate2 TestCert3 = new X509Certificate2("Kentor.AuthServices.Tests3.pfx");
+        public static readonly X509Certificate2 TestCertSignOnly = new X509Certificate2("Kentor.AuthServices.TestsSignOnly.pfx");
 
         public static readonly RsaKeyIdentifierClause TestKey =
             new RsaKeyIdentifierClause((RSA)TestCert.PublicKey.Key);
@@ -21,9 +25,12 @@ namespace Kentor.AuthServices.Tests.Helpers
         public static readonly RsaKeyIdentifierClause TestKey2 =
             new RsaKeyIdentifierClause((RSA)TestCert2.PublicKey.Key);
 
+        public static readonly RsaKeyIdentifierClause TestKeySignOnly =
+            new RsaKeyIdentifierClause((RSA)TestCertSignOnly.PublicKey.Key);
+
         public static readonly KeyDescriptor TestKeyDescriptor = new KeyDescriptor(
             new SecurityKeyIdentifier(
-                (new X509SecurityToken(TestCert))
+                (new X509SecurityToken(TestCertSignOnly))
                 .CreateKeyIdentifierClause<X509RawDataKeyIdentifierClause>()));
 
         public static string SignXml(string xml, bool includeKeyInfo = false, bool preserveWhitespace = true)
@@ -42,38 +49,13 @@ namespace Kentor.AuthServices.Tests.Helpers
             {
                 certificate = TestCert2;
             }
+
             var xmlDoc = new XmlDocument { PreserveWhitespace = true };
-            var wrappedAssertion = string.Format(@"<saml2:EncryptedAssertion xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion"">{0}</saml2:EncryptedAssertion>", assertionXml);
+            var wrappedAssertion = $@"<saml2:EncryptedAssertion xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion"">{assertionXml}</saml2:EncryptedAssertion>";
             xmlDoc.LoadXml(wrappedAssertion);
+            var elementToEncrypt = (XmlElement)xmlDoc.GetElementsByTagName("Assertion", Saml2Namespaces.Saml2Name)[0];
 
-            var symmetricAlgorithm = new RijndaelManaged { KeySize = 256 };
-
-            var encryptedData = new EncryptedData
-            {
-                Type = EncryptedXml.XmlEncElementUrl,
-                EncryptionMethod = new System.Security.Cryptography.Xml.EncryptionMethod(EncryptedXml.XmlEncAES256Url)
-            };
-
-            var elementToEncrypt = (XmlElement) xmlDoc.GetElementsByTagName("Assertion", Saml2Namespaces.Saml2Name)[0];
-
-            // Encrypt the assertion and add it to the encryptedData instance.
-            var encryptedXml = new EncryptedXml();
-            var encryptedElement = encryptedXml.EncryptData(elementToEncrypt, symmetricAlgorithm, false);
-            encryptedData.CipherData.CipherValue = encryptedElement;
-
-            // Add an encrypted version of the key used.
-            encryptedData.KeyInfo = new KeyInfo();
-
-            var algorithm = useOaep ? EncryptedXml.XmlEncRSAOAEPUrl : EncryptedXml.XmlEncRSA15Url;
-            var encryptedKey = new EncryptedKey
-            {
-                EncryptionMethod = new System.Security.Cryptography.Xml.EncryptionMethod(algorithm),
-                CipherData = new CipherData(EncryptedXml.EncryptKey(symmetricAlgorithm.Key, (RSA)certificate.PublicKey.Key, useOaep))
-            };
-
-            encryptedData.KeyInfo.AddClause(new KeyInfoEncryptedKey(encryptedKey));
-
-            EncryptedXml.ReplaceElement(elementToEncrypt, encryptedData, false);
+            elementToEncrypt.Encrypt( useOaep, certificate);
 
             return xmlDoc.OuterXml;
         }
@@ -91,6 +73,26 @@ namespace Kentor.AuthServices.Tests.Helpers
             var keyInfo2 = new KeyInfo();
             keyInfo2.AddClause(new KeyInfoX509Data(TestCert2));
             KeyInfoXml2 = keyInfo2.GetXml().OuterXml;
+        }
+
+        public static void RemoveGlobalSha256XmlSignatureSupport()
+        {
+            // Clean up after tests that globally activate SHA256 support. There
+            // is no official API for removing signature algorithms, so let's
+            // do some reflection.
+
+            var internalSyncObject = typeof(CryptoConfig)
+                .GetProperty("InternalSyncObject", BindingFlags.Static | BindingFlags.NonPublic)
+                .GetValue(null);
+
+            lock (internalSyncObject)
+            {
+                var appNameHT = (IDictionary<string, Type>)typeof(CryptoConfig)
+                    .GetField("appNameHT", BindingFlags.Static | BindingFlags.NonPublic)
+                    .GetValue(null);
+
+                appNameHT.Remove("http://www.w3.org/2001/04/xmldsig-more#rsa-sha256");
+            }
         }
     }
 }

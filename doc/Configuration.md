@@ -28,10 +28,11 @@ does not need any http modules, please see the separate info on the [Owin middle
 ```
 <system.web>
   <httpModules>
-	<!-- Add these modules below any existing. -->
+	<!-- Add these modules below any existing. The SessionAuthenticatioModule
+         must be loaded before the Saml2AuthenticationModule -->
     <add name="SessionAuthenticationModule" type="System.IdentityModel.Services.SessionAuthenticationModule, System.IdentityModel.Services, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"/>
     <!-- Only add the Saml2AuthenticationModule if you're using the Kentor.AuthServices.HttpModule
-		library. If you are using Kentor.AuthServices.Mvc you SHOULD NOT load this module.-->
+		 library. If you are using Kentor.AuthServices.Mvc you SHOULD NOT load this module.-->
 	<add name="Saml2AuthenticationModule" type="Kentor.AuthServices.HttpModule.Saml2AuthenticationModule, Kentor.AuthServices.HttpModule"/>
   </httpModules>
 </system.web>
@@ -39,7 +40,7 @@ does not need any http modules, please see the separate info on the [Owin middle
 
 ##kentor.authServices Section
 The saml2AuthenticationModule section contains the configuration of the Kentor.AuthServices
-library. It is required for the http module and the mvc controller. Thw Owin middleware Can
+library. It is required for the http module and the mvc controller. The Owin middleware Can
 read web.config, but can also be configured from code.
 
 ```
@@ -70,6 +71,11 @@ read web.config, but can also be configured from code.
          allowUnsolicitedAuthnResponse="true" 
          loadMetadata = "true" />
   </identityProviders>
+  <!-- Optional configuration for signed requests. Required for Single Logout. -->
+  <serviceCertificates>
+    <add fileName="~/App_Data/Kentor.AuthServices.Tests.pfx" />
+  </serviceCertificates>
+  <!-- Optional configuration for fetching IDP list from a federation -->
   <federations>
     <add metadataLocation="https://federation.example.com/metadata.xml" allowUnsolicitedAuthnResponse = "false" />
   </federations>
@@ -97,6 +103,7 @@ Root element of the config section.
 * [`<identityProviders>`](#identityproviders-element)
 * [`<federations>`](#federations-element)
 * [`<serviceCertificates>`](#servicecertificates-element)
+* [`<compatibility>`](#compatibility-element)
 
 ####`entityId` Attribute
 *Attribute of the [`<kentor.authServices>`](#kentor-authservices-section) element.*
@@ -104,7 +111,7 @@ Root element of the config section.
 The name that this service provider will use for itself when sending
 messages. The name will end up in the `Issuer` field in outcoing authnRequests.
 
-The SAML standard requires the `entityId` to be an absolut URI. Typically it should
+The SAML standard requires the `entityId` to be an absolute URI. Typically it should
 be the URL where the metadata is presented. E.g.
 `http://sp.example.com/AuthServices/`.
 
@@ -171,7 +178,7 @@ metadata is used in communication with the Idp.
 *Optional child element of the [`<kentor.authServices>`](#kentor-authservices-section) element.*
 
 Controls the generation of NameIDPolicy element in AuthnRequests. The element Is
-only created if either `allowCreate` nor `format` are set to a non-default value.
+only created if either `allowCreate` or `format` are set to a non-default value.
 
 ####Attributes
 * [`allowCreate`](#allowcreate-attribute)
@@ -464,6 +471,7 @@ A list of identity providers known to the service provider.
 * [`wantAuthnRequestsSigned`](#wantauthnrequestssigned-attribute)
 * [`loadMetadata`](#loadmetadata-attribute)
 * [`metadataLocation`](#metadataLocation-attribute-idp)
+* [`disableOutboundLogoutRequests`](disableOutboundLogoutRequests-attribute)
 
 ####Elements
 * [`<signingCertificate>`](#signingcertificate-element)
@@ -493,10 +501,13 @@ certificate configured in AuthServices as all logout messages must be signed.
 ####`allowUnsolicitedAuthnResponse` Attribute
 *Attribute of the [`<add>`](#add-identityprovider-element) element*
 
-Allow unsolicited responses. That is InResponseTo is missing in the AuthnRequest.  
-If true InResponseTo is not required. The IDP can initiate the authentication process.  
-If false InResponseTo is required. The authentication process must be initiated by an AuthnRequest from this SP.  
-Even though allowUnsolicitedAuthnResponse is true the InResponseTo must be valid if existing.
+Allow unsolicited responses. That is, Idp initiated sign on where there was no
+prior AuthnRequest. 
+If `true` InResponseTo is not required and the IDP can initiate the authentication
+process. If `false` InResponseTo is required and the authentication process must
+be initiated by an AuthnRequest from this SP. 
+Note that if the authentication was SP-intiatied, RelayState and InResponseTo
+must be present and valid.
 
 ####`binding` Attribute
 *Optional attribute of the [`<add>`](#add-identityprovider-element) element*
@@ -532,6 +543,14 @@ for an idp, AuthServices normally interprets the EntityId as a url to the metada
 If the metadata is located somewhere else it can be specified with this
 configuration parameter. The location can be a URL, an absolute path to a local
 file or an app relative path (e.g. ~/App_Data/IdpMetadata.xml)
+
+####`disableOutboundLogoutRequests` Attribute
+*Optional attribute of the [`add`](#add-identityprovider-element) element*
+
+Disable outbound logout requests to this idp, even though AuthServices is
+configured for single logout and the idp supports it. This setting might be
+usable when adding SLO to an existing setup, to ensure that everyone is ready
+for SLO before activating.
 
 ###`<signingCertificate>` Element
 *Optional child element of the [`<identityProvider>`](#identityprovider-element) element*
@@ -664,6 +683,7 @@ But also has the below options for configuring how the certificate will be used.
 * [`metadataPublishOverride`](#metadatapublishoverride-attribute-servicecertificate)
 
 ####`use` Attribute (ServiceCertificate)
+* Optional attribute of [`<add>`](#add-servicecertificate-element).*
 
 How should this certificate be used? 
 Options are:
@@ -672,6 +692,7 @@ Options are:
  * Both (Default)
 
 ####`status` Attribute (ServiceCertificate)
+* Optional attribute of [`<add>`](#add-servicecertificate-element).*
 
 Is this certificate for current or future use (i.e. key rollover scenario)? 
 Options are:
@@ -679,6 +700,7 @@ Options are:
  * Future
 
 ####`metadataPublishOverride` Attribute (ServiceCertificate)
+* Optional attribute of [`<add>`](#add-servicecertificate-element).*
 
 Should we override how this certificate is published in the metadata? 
 Options are:
@@ -697,7 +719,21 @@ Signing | Future | Signing | No
 Encryption | Current | Encryption _unless Future key exists_ then not published | Yes 
 Encryption | Future | Encryption | Yes 
 
+###`</compatibility>` Element
+*Optional child element of the [`<kentor.authServices>`](#kentorauthservices-section) element.*
 
+Enables overrides of default behaviour to increase compatibility with identity
+providers.
+
+####Attributes
+* [`unpackEntitiesDescriptorInIdentityProviderMetadata`](#unpackentitiesdescriptorinidentityprovidermetadata-attribute)
+
+####`unpackEntitiesDescriptorInIdentityProviderMetadata` Attribute
+* Optional attribute of [`unpackEntitiesDescriptorInIdentityProviderMetadata`](#unpackentitiesdescriptorinidentityprovidermetadata-attribute)*
+
+If an EntitiesDescriptor element is found when loading metadata for an
+IdentityProvider, automatically check inside it if there is a single
+EntityDescriptor and in that case use it.
 
 ##`<system.identityModel>` Section
 *Child element of `<configuration>` element.*

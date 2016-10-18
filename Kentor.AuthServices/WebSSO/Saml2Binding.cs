@@ -124,7 +124,16 @@ namespace Kentor.AuthServices.WebSso
         /// <returns>A derived class instance that supports the requested binding.</returns>
         public static Saml2Binding Get(Saml2BindingType binding)
         {
-            return bindings[binding];
+            try
+            {
+                return bindings[binding];
+            }
+            catch(KeyNotFoundException ex)
+            {
+                throw new ArgumentException(string.Format(CultureInfo.InvariantCulture,
+                    "{0} is not a valid value for the Saml2BindingType enum. Have you forgotten to configure a binding for your identity provider?",
+                    binding), ex);
+            }
         }
 
         /// <summary>
@@ -142,6 +151,12 @@ namespace Kentor.AuthServices.WebSso
         {
             { HttpRedirectUri, Saml2BindingType.HttpRedirect },
             { HttpPostUri, Saml2BindingType.HttpPost }
+        };
+
+        private readonly static IDictionary<Saml2BindingType, Uri> bindingUriMap = new Dictionary<Saml2BindingType, Uri>()
+        {
+            { Saml2BindingType.HttpPost, HttpPostUri },
+            { Saml2BindingType.Artifact, HttpArtifactUri }
         };
 
         /// <summary>
@@ -165,6 +180,24 @@ namespace Kentor.AuthServices.WebSso
             }
 
             var msg = string.Format(CultureInfo.InvariantCulture, "Unknown Saml2 Binding Uri \"{0}\".", uri);
+            throw new ArgumentException(msg);
+        }
+
+        /// <summary>
+        /// Gets the Uri for a Saml2BindingType.
+        /// </summary>
+        /// <param name="type">Saml2BindingType</param>
+        /// <returns>Uri constant for the speicified Binding Type</returns>
+        /// <exception cref="ArgumentException">If the type is not mapped.</exception>
+        public static Uri Saml2BindingTypeToUri(Saml2BindingType type)
+        {
+            Uri uri;
+            if (bindingUriMap.TryGetValue(type, out uri))
+            {
+                return uri;
+            }
+
+            var msg = string.Format(CultureInfo.InvariantCulture, "Unknown Saml2 Binding Type \"{0}\".", type);
             throw new ArgumentException(msg);
         }
     }

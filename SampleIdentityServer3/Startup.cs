@@ -46,8 +46,14 @@ namespace SampleIdentityServer3
 
                     RequireSsl = false,
 
+                    AuthenticationOptions = new IdentityServer3.Core.Configuration.AuthenticationOptions
+                    {
+                        EnableAutoCallbackForFederatedSignout = true,
+                        EnableSignOutPrompt = false
+                    },
+
                     SigningCertificate = 
-                        new X509Certificate2(AppDomain.CurrentDomain.BaseDirectory + "\\App_Data\\Kentor.AuthServices.Tests.pfx")
+                        new X509Certificate2(AppDomain.CurrentDomain.BaseDirectory + "\\App_Data\\Kentor.AuthServices.SampleIdentityServer3.pfx")
                 };
 
                 options.AuthenticationOptions.IdentityProviders = ConfigureSaml2;

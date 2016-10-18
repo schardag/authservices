@@ -10,6 +10,7 @@ using System.Web.Security;
 using System.Text;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 
 namespace Kentor.AuthServices.Tests.HttpModule
 {
@@ -37,12 +38,14 @@ namespace Kentor.AuthServices.Tests.HttpModule
             request.Form.Returns(new NameValueCollection { { "Key", "Value" } });
             request.ApplicationPath.Returns(appPath);
 
-            var cookieValue = HttpRequestData.EscapeBase64CookieValue(Convert.ToBase64String(
-                MachineKey.Protect(Encoding.UTF8.GetBytes("CookieValue"), "Kentor.AuthServices")));
+            var cookieValue = HttpRequestData.ConvertBinaryData(
+                MachineKey.Protect(
+                    new StoredRequestState(null, new Uri("urn:someUri"), null, null).Serialize(),
+                    HttpRequestBaseExtensions.ProtectionPurpose));
             request.Cookies.Returns(new HttpCookieCollection());
             request.Cookies.Add(new HttpCookie("Kentor.SomeState", cookieValue));
 
-            var subject = request.ToHttpRequestData();
+            var actual = request.ToHttpRequestData();
 
             var expected = new HttpRequestData(
                 "GET",
@@ -53,10 +56,11 @@ namespace Kentor.AuthServices.Tests.HttpModule
                     new KeyValuePair<string, string[]>("Key", new string[] { "Value" })
                 },
                 Enumerable.Empty<KeyValuePair<string, string>>(),
-                null);
+                null, 
+                ClaimsPrincipal.Current);
 
-            subject.ShouldBeEquivalentTo(expected, opt => opt.Excluding(s => s.CookieData));
-            subject.CookieData.Should().Be("CookieValue");
+            actual.ShouldBeEquivalentTo(expected, opt => opt.Excluding(s => s.StoredRequestState));
+            actual.StoredRequestState.ReturnUrl.AbsoluteUri.Should().Be("urn:someUri");
         }
 
         [TestMethod]
@@ -86,7 +90,8 @@ namespace Kentor.AuthServices.Tests.HttpModule
                     new KeyValuePair<string, string[]>("Key", new string[] { "Value" })
                 },
                 Enumerable.Empty<KeyValuePair<string, string>>(),
-                null);
+                null,
+                ClaimsPrincipal.Current);
 
             subject.ShouldBeEquivalentTo(expected);
         }

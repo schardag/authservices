@@ -38,7 +38,6 @@
     <Reference Include="System" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Deployment" />
     <Reference Include="System.IdentityModel" />
     <Reference Include="System.identitymodel.services" />
     <Reference Include="System.Runtime.Serialization" />
@@ -57,10 +56,19 @@
     <Compile Include="ClaimsExtensions.cs" />
     <Compile Include="Configuration\ArtifactResolutionServiceCollection.cs" />
     <Compile Include="Configuration\ArtifactResolutionServiceElement.cs" />
-    <Compile Include="Configuration\ServiceCertificateCollectionExtensions.cs" />
+    <Compile Include="Configuration\KentorAuthServicesNotifications.cs" />
+    <Compile Include="Configuration\Compatibility.cs" />
+    <Compile Include="Configuration\CompatibilityElement.cs" />
+    <Compile Include="Internal\DateTimeHelper.cs" />
+    <Compile Include="Exceptions\UnexpectedInResponseToException.cs" />
+    <Compile Include="Internal\DelimitedString.cs" />
+    <Compile Include="Internal\DictionaryExtensions.cs" />
+    <Compile Include="ManagedSha256SignatureDescription.cs" />
     <Compile Include="Saml2NameIdExtensions.cs" />
+    <Compile Include="Configuration\ServiceCertificateCollection.cs" />
     <Compile Include="Saml2P\AuthnContextComparisonType.cs" />
     <Compile Include="Configuration\NameIdPolicyElement.cs" />
+    <Compile Include="Saml2P\Saml2IdpEntry.cs" />
     <Compile Include="Saml2P\Saml2LogoutResponse.cs" />
     <Compile Include="Saml2P\Saml2RequestedAuthnContext.cs" />
     <Compile Include="Configuration\RequestedAuthnContextElement.cs" />
@@ -70,12 +78,13 @@
     <Compile Include="MetadataPublishOverrideType.cs" />
     <Compile Include="CertificateStatus.cs" />
     <Compile Include="CertificateUse.cs" />
-    <Compile Include="Configuration\ServiceCertificateCollection.cs" />
+    <Compile Include="Configuration\ServiceCertificateElementCollection.cs" />
     <Compile Include="Configuration\ServiceCertificateElement.cs" />
     <Compile Include="Saml2P\NameIdFormat.cs" />
     <Compile Include="Saml2P\Saml2ArtifactResolve.cs" />
     <Compile Include="Saml2P\Saml2ArtifactResponse.cs" />
     <Compile Include="Saml2P\Saml2NameIdPolicy.cs" />
+    <Compile Include="Saml2P\Saml2Scoping.cs" />
     <Compile Include="Saml2P\Saml2SoapBinding.cs" />
     <Compile Include="Saml2P\Saml2StatusResponseType.cs" />
     <Compile Include="ServiceCertificate.cs" />
@@ -96,7 +105,7 @@
     <Compile Include="Metadata\RequestedAttribute.cs" />
     <Compile Include="Metadata\ExtendedEntitiesDescriptor.cs" />
     <Compile Include="ICachedMetadata.cs" />
-    <Compile Include="MetadataRefreshScheduler.cs" />
+    <Compile Include="Metadata\MetadataRefreshScheduler.cs" />
     <Compile Include="Metadata\ServiceProviderSingleSignOnDescriptorExtensions.cs" />
     <Compile Include="Metadata\ExtendedEntityDescriptor.cs" />
     <Compile Include="Exceptions\AuthServicesException.cs" />
@@ -118,7 +127,6 @@
     <Compile Include="Configuration\IdentityProviderElement.cs" />
     <Compile Include="Configuration\CertificateElement.cs" />
     <Compile Include="Configuration\IOptions.cs" />
-    <Compile Include="Configuration\ISPOptions.cs" />
     <Compile Include="Configuration\Options.cs" />
     <Compile Include="DateTimeExtensions.cs" />
     <Compile Include="Internal\EntityIdEqualityComparer.cs" />
@@ -138,7 +146,6 @@
     <Compile Include="WebSso\ICommand.cs" />
     <Compile Include="WebSso\CommandFactory.cs" />
     <Compile Include="StoredRequestState.cs" />
-    <Compile Include="Internal\PendingAuthnRequests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Internal\ReturnRequestedIssuerNameRegistry.cs" />
     <Compile Include="Saml2AssertionExtensions.cs" />
@@ -171,7 +178,6 @@
       <link>CustomDictionary.xml</link>
     </CodeAnalysisDictionary>
   </ItemGroup>
-  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web;
@@ -14,6 +15,8 @@ namespace Kentor.AuthServices.HttpModule
     /// </summary>
     public static class HttpRequestBaseExtensions
     {
+        internal const string ProtectionPurpose = "Kentor.AuthServices";
+
         /// <summary>
         /// Extension method to convert a HttpRequestBase to a HttpRequestData.
         /// </summary>
@@ -52,7 +55,8 @@ namespace Kentor.AuthServices.HttpModule
                 requestBase.Form.Cast<string>().Select((de, i) =>
                     new KeyValuePair<string, string[]>(de, ((string)requestBase.Form[i]).Split(','))),
                 cookies,
-                v => MachineKey.Unprotect(v, "Kentor.AuthServices"));
+                v => MachineKey.Unprotect(v, ProtectionPurpose),
+                ClaimsPrincipal.Current);
         }
 
         private static IEnumerable<KeyValuePair<string, string>> GetCookies(HttpRequestBase requestBase)

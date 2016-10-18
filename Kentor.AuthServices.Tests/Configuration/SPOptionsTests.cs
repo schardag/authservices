@@ -22,6 +22,8 @@ namespace Kentor.AuthServices.Tests.Configuration
                 KentorAuthServicesSection.Current.AllowChange = false;
                 KentorAuthServicesSection.Current.Metadata.WantAssertionsSigned = false;
                 KentorAuthServicesSection.Current.Metadata.AllowChange = false;
+                KentorAuthServicesSection.Current.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata = false;
+                KentorAuthServicesSection.Current.Compatibility.AllowChange = false;
             }
         }
 
@@ -59,8 +61,10 @@ namespace Kentor.AuthServices.Tests.Configuration
             config.Metadata.AllowChange = true;
             config.Metadata.WantAssertionsSigned = true;
             config.ValidateCertificates = true;
+            config.Compatibility.AllowChange = true;
+            config.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata = true;
 
-            ISPOptions subject = new SPOptions(KentorAuthServicesSection.Current);
+            SPOptions subject = new SPOptions(KentorAuthServicesSection.Current);
             subject.ReturnUrl.Should().Be(config.ReturnUrl);
             subject.MetadataCacheDuration.Should().Be(config.Metadata.CacheDuration);
             subject.MetadataValidDuration.Should().Be(config.Metadata.ValidUntil);
@@ -75,6 +79,7 @@ namespace Kentor.AuthServices.Tests.Configuration
             subject.AuthenticateRequestSigningBehavior.Should().Be(config.AuthenticateRequestSigningBehavior);
             subject.RequestedAuthnContext.ClassRef.OriginalString.Should().Be("urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport");
             subject.RequestedAuthnContext.Comparison.Should().Be(AuthnContextComparisonType.Minimum);
+            subject.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata.Should().BeTrue();
         }
 
         [TestMethod]
@@ -366,13 +371,13 @@ namespace Kentor.AuthServices.Tests.Configuration
             subject.ServiceCertificates.Add(new ServiceCertificate
             {
                 Use = CertificateUse.Signing,
-                Certificate = SignedXmlHelper.TestCert2
+                Certificate = SignedXmlHelper.TestCertSignOnly
             });
             subject.ServiceCertificates.Add(new ServiceCertificate
             {
                 Status = CertificateStatus.Future,
                 Use = CertificateUse.Signing,
-                Certificate = SignedXmlHelper.TestCert3
+                Certificate = SignedXmlHelper.TestCert2
             });
 
             var result = subject.MetadataCertificates;
@@ -509,6 +514,18 @@ namespace Kentor.AuthServices.Tests.Configuration
             var result = subject.MetadataCertificates;
             result.Count.Should().Be(1);
             result[0].Status.Should().Be(CertificateStatus.Current);
+        }
+
+        [TestMethod]
+        public void SPOptions_Saml2PSecurityTokenHandler_Setter()
+        {
+            var subject = StubFactory.CreateSPOptions();
+
+            var handler = new Saml2PSecurityTokenHandler(subject);
+
+            subject.Saml2PSecurityTokenHandler = handler;
+
+            subject.Saml2PSecurityTokenHandler.Should().BeSameAs(handler);
         }
     }
 }

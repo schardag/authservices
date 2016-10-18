@@ -65,7 +65,8 @@ namespace Kentor.AuthServices.WebSso
                 throw new ArgumentNullException(nameof(options));
             }
 
-            var binding = Saml2Binding.Get(request);
+            CommandResult commandResult;
+            var binding = options.Notifications.GetBinding(request);
             if (binding != null)
             {
                 var unbindResult = binding.Unbind(request, options);
@@ -73,15 +74,21 @@ namespace Kentor.AuthServices.WebSso
                 switch (unbindResult.Data.LocalName)
                 {
                     case "LogoutRequest":
-                        return HandleRequest(unbindResult, options);
+                        commandResult = HandleRequest(unbindResult, options);
+                        break;
                     case "LogoutResponse":
-                        return HandleResponse(unbindResult, request);
+                        commandResult = HandleResponse(unbindResult, request);
+                        break;
                     default:
                         throw new NotImplementedException();
                 }
             }
-
-            return InitiateLogout(request, returnPath, options);
+            else
+            {
+                commandResult = InitiateLogout(request, returnPath, options);
+            }
+            options.Notifications.LogoutCommandResultCreated(commandResult);
+            return commandResult;
         }
 
         private static void VerifyMessageIsSigned(UnbindResult unbindResult, IOptions options)
@@ -108,23 +115,34 @@ namespace Kentor.AuthServices.WebSso
 
         private static CommandResult InitiateLogout(HttpRequestData request, string returnPath, IOptions options)
         {
-            var idpEntityId = ClaimsPrincipal.Current.FindFirst(AuthServicesClaimTypes.LogoutNameIdentifier)?.Issuer
-                ?? ClaimsPrincipal.Current.FindFirst(ClaimTypes.NameIdentifier)?.Issuer;
+            string idpEntityId = null;
+            Claim sessionIndexClaim = null;
+            if (request.User != null)
+            {
+                idpEntityId = request.User.FindFirst(AuthServicesClaimTypes.LogoutNameIdentifier)?.Issuer;
+                sessionIndexClaim = request.User.FindFirst(AuthServicesClaimTypes.SessionIndex);
+            }
 
             CommandResult commandResult;
             IdentityProvider idp;
             if(idpEntityId != null 
                 && options.IdentityProviders.TryGetValue(new EntityId(idpEntityId), out idp)
-                && ClaimsPrincipal.Current.FindFirst(AuthServicesClaimTypes.SessionIndex) != null
+                && sessionIndexClaim != null
                 && idp.SingleLogoutServiceUrl != null
-                && options.SPOptions.SigningServiceCertificate != null)
+                && options.SPOptions.SigningServiceCertificate != null
+                && !idp.DisableOutboundLogoutRequests)
             {
-                var logoutRequest = idp.CreateLogoutRequest();
+                var logoutRequest = idp.CreateLogoutRequest(request.User);
 
-                commandResult = Saml2Binding.Get(Saml2BindingType.HttpRedirect)
+                commandResult = Saml2Binding.Get(idp.SingleLogoutServiceBinding)
                     .Bind(logoutRequest);
 
-                commandResult.SetCookieData = GetReturnUrl(request, returnPath, options).ToString();
+                commandResult.RequestState = new StoredRequestState(
+                    idp.EntityId,
+                    GetReturnUrl(request, returnPath, options),
+                    logoutRequest.Id,
+                    null);
+
                 commandResult.SetCookieName = "Kentor." + logoutRequest.RelayState;
             }
             else
@@ -143,15 +161,13 @@ namespace Kentor.AuthServices.WebSso
 
         private static Uri GetReturnUrl(HttpRequestData request, string returnPath, IOptions options)
         {
-            var urls = new AuthServicesUrls(request, options.SPOptions);
-
             if (!string.IsNullOrEmpty(returnPath))
             {
-                return new Uri(urls.ApplicationUrl, returnPath);
+                return new Uri(returnPath, UriKind.RelativeOrAbsolute);
             }
             else
             {
-                return urls.ApplicationUrl;
+                return new AuthServicesUrls(request, options.SPOptions).ApplicationUrl;
             }
         }
 
@@ -196,8 +212,8 @@ namespace Kentor.AuthServices.WebSso
             return new CommandResult()
             {
                 HttpStatusCode = HttpStatusCode.SeeOther,
-                Location = new Uri(request.CookieData),
-                ClearCookieName = "Kentor." + request.QueryString["RelayState"].Single()
+                Location = request.StoredRequestState.ReturnUrl,
+                ClearCookieName = "Kentor." + unbindResult.RelayState
             };
         }
     }

@@ -2,7 +2,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Kentor.AuthServices.Owin;
 using FluentAssertions;
-using Microsoft.Owin.Security.Infrastructure;
 using Microsoft.Owin;
 using Owin;
 using Microsoft.Owin.Security;
@@ -17,11 +16,9 @@ using Kentor.AuthServices.Configuration;
 using System.Net.Http;
 using NSubstitute;
 using System.Xml.Linq;
-using System.Xml;
 using System.Threading.Tasks;
 using System.IdentityModel.Tokens;
 using System.IdentityModel.Metadata;
-using Kentor.AuthServices.Internal;
 using System.Reflection;
 using System.Threading;
 using Kentor.AuthServices.Saml2P;
@@ -146,6 +143,33 @@ namespace Kentor.AuthServices.Tests.Owin
         }
 
         [TestMethod]
+        public async Task KentorAuthServicesAuthenticationMiddleware_RedirectToIdp_HonorsCommandResultHandled()
+        {
+            var options = new KentorAuthServicesAuthenticationOptions(true)
+            {
+                AuthenticationMode = AuthenticationMode.Active,
+                Notifications = new KentorAuthServicesNotifications
+                {
+                    SignInCommandResultCreated = (cr, r) =>
+                    {
+                        cr.HandledResult = true;
+                    }
+                }
+            };
+
+            var middleware = new KentorAuthServicesAuthenticationMiddleware(
+                new StubOwinMiddleware(401, new AuthenticationResponseChallenge(
+                    new string[0], null)), CreateAppBuilder(),
+                options);
+
+            var context = OwinTestHelpers.CreateOwinContext();
+
+            await middleware.Invoke(context);
+
+            context.Response.StatusCode.Should().Be(401);
+        }
+
+        [TestMethod]
         public async Task KentorAuthServicesAuthenticationMiddleware_CreatesPostOnAuthChallenge()
         {
             var middleware = new KentorAuthServicesAuthenticationMiddleware(
@@ -186,7 +210,7 @@ namespace Kentor.AuthServices.Tests.Owin
             var revoke = new AuthenticationResponseRevoke(new string[0]);
 
             var options = new KentorAuthServicesAuthenticationOptions(true);
-            ((SPOptions)options.SPOptions).PublicOrigin = new Uri("https://sp.example.com/ExternalPath/");
+            options.SPOptions.PublicOrigin = new Uri("https://sp.example.com/ExternalPath/");
 
             var subject = new KentorAuthServicesAuthenticationMiddleware(
                 new StubOwinMiddleware(200, revoke: revoke),
@@ -198,11 +222,10 @@ namespace Kentor.AuthServices.Tests.Owin
             context.Request.Host = new HostString("sp-internal.example.com");
             context.Request.PathBase = new PathString("/InternalPath");
             context.Request.Path = new PathString("/LoggedOut");
-
-            Thread.CurrentPrincipal = new ClaimsPrincipal(
+            context.Request.User = new ClaimsPrincipal(
                 new ClaimsIdentity(new Claim[]
                 {
-                    new Claim(ClaimTypes.NameIdentifier, "NameId", null, "https://idp.example.com"),
+                    new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, ",,,,NameId", null, "https://idp.example.com"),
                     new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, "https://idp.example.com")
                 }, "Federation"));
 
@@ -210,65 +233,38 @@ namespace Kentor.AuthServices.Tests.Owin
 
             context.Response.StatusCode.Should().Be(303);
             context.Response.Headers["Location"].Should().StartWith("https://idp.example.com/logout?SAMLRequest");
+            var returnUrl = ExtractRequestState(options.DataProtector, context).ReturnUrl;
 
-            var cookieValue = context.Response.Headers["Set-Cookie"].Split(';', '=')[1]
-                .Replace('_', '/').Replace('-', '+').Replace('.', '=');
-
-            var returnUrl = Encoding.UTF8.GetString(options.DataProtector.Unprotect(
-                Convert.FromBase64String(cookieValue)));
-
-            returnUrl.Should().Be("https://sp.example.com/ExternalPath/LoggedOut");
+            returnUrl.Should().Be("/LoggedOut");
         }
 
         [TestMethod]
-        public async Task KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect_RelativePath()
-        {
-            await KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect(
-                "LoggedOut", "https://sp.example.com/ExternalPath/Account/LoggedOut");
-        }
-
-        [TestMethod]
-        public async Task KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect_RelativePath_SimplePath()
-        {
-            await KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect(
-                "LoggedOut", "https://sp.example.com/ExternalPath/LoggedOut", "/LogOut");
-        }
-
-        [TestMethod]
-        public async Task KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect_AppRelative()
-        {
-            await KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect(
-                "/LoggedOut", "https://sp.example.com/LoggedOut");
-        }
-
-        [TestMethod]
-        public async Task KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect_Absolute()
-        {
-            await KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect(
-                "http://loggedout.example.com/SomePath", "http://loggedout.example.com/SomePath");
-        }
-
-        private async Task KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_PreservesRedirect(
-            string location, string expectedUrl, string path = "/Account/LogOut")
+        public async Task KentorAuthServicesAuthenticationMiddleware_AuthRevoke_HonorsCommandResultHandled()
         {
             var revoke = new AuthenticationResponseRevoke(new string[0]);
 
-            var options = new KentorAuthServicesAuthenticationOptions(true);
-            ((SPOptions)options.SPOptions).PublicOrigin = new Uri("https://sp.example.com/ExternalPath/");
+            var options = new KentorAuthServicesAuthenticationOptions(true)
+            {
+                Notifications = new KentorAuthServicesNotifications
+                {
+                    LogoutCommandResultCreated = cr =>
+                    {
+                        cr.HandledResult = true;
+                    }
+                }
+            };
 
             var subject = new KentorAuthServicesAuthenticationMiddleware(
-                new StubOwinMiddleware(303, revoke: revoke),
+                new StubOwinMiddleware(200, revoke: revoke),
                 CreateAppBuilder(),
                 options);
 
             var context = OwinTestHelpers.CreateOwinContext();
             context.Request.Scheme = "http";
             context.Request.Host = new HostString("sp-internal.example.com");
-            context.Request.PathBase = new PathString("/AppPath");
-            context.Request.Path = new PathString(path);
-            context.Response.Headers["Location"] = location;
-
-            Thread.CurrentPrincipal = new ClaimsPrincipal(
+            context.Request.PathBase = new PathString("/InternalPath");
+            context.Request.Path = new PathString("/LoggedOut");
+            context.Request.User = new ClaimsPrincipal(
                 new ClaimsIdentity(new Claim[]
                 {
                     new Claim(ClaimTypes.NameIdentifier, "NameId", null, "https://idp.example.com"),
@@ -277,13 +273,52 @@ namespace Kentor.AuthServices.Tests.Owin
 
             await subject.Invoke(context);
 
-            var cookieValue = context.Response.Headers["Set-Cookie"].Split(';', '=')[1]
-                .Replace('_', '/').Replace('-', '+').Replace('.', '=');
+            context.Response.StatusCode.Should().Be(200);
+        }
 
-            var returnUrl = Encoding.UTF8.GetString(options.DataProtector.Unprotect(
-                Convert.FromBase64String(cookieValue)));
+        private static StoredRequestState ExtractRequestState(IDataProtector dataProtector, OwinContext context)
+        {
+            var cookieData = context.Response.Headers["Set-Cookie"].Split(';', '=')[1];
 
-            returnUrl.Should().Be(expectedUrl);
+            return new StoredRequestState(
+                dataProtector.Unprotect(
+                    HttpRequestData.GetBinaryData(cookieData)));
+        }
+
+        [TestMethod]
+        public async Task KentorAuthServicesAuthenticationMiddleware_CreatesRedirectOnAuthRevoke_UsesAuthPropsReturnUrl()
+        {
+            var authPropsReturnUrl = "http://sp.exmample.com/AuthPropsLogout";
+
+            var revoke = new AuthenticationResponseRevoke(
+                new string[0],
+                new AuthenticationProperties { RedirectUri = authPropsReturnUrl });
+
+            var options = new KentorAuthServicesAuthenticationOptions(true);
+            options.SPOptions.PublicOrigin = new Uri("https://sp.example.com/ExternalPath/");
+
+            var subject = new KentorAuthServicesAuthenticationMiddleware(
+                new StubOwinMiddleware(303, revoke: revoke),
+                CreateAppBuilder(),
+                options);
+
+            var context = OwinTestHelpers.CreateOwinContext();
+            context.Response.Headers["Location"] = "http://sp.example.com/locationHeader";
+            context.Request.User = new ClaimsPrincipal(
+                new ClaimsIdentity(new Claim[]
+                {
+                    new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, ",,,,NameId", null, "https://idp.example.com"),
+                    new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, "https://idp.example.com")
+                }, "Federation"));
+
+            await subject.Invoke(context);
+
+            var cookieValue = context.Response.Headers["Set-Cookie"].Split(';', '=')[1];
+
+            var returnUrl = new StoredRequestState(options.DataProtector.Unprotect(
+                HttpRequestData.GetBinaryData(cookieValue))).ReturnUrl;
+
+            returnUrl.Should().Be(authPropsReturnUrl);
         }
 
         [TestMethod]
@@ -325,10 +360,10 @@ namespace Kentor.AuthServices.Tests.Owin
 
             var context = OwinTestHelpers.CreateOwinContext();
 
-            Thread.CurrentPrincipal = new ClaimsPrincipal(
+            context.Request.User = new ClaimsPrincipal(
                 new ClaimsIdentity(new Claim[]
                 {
-                    new Claim(ClaimTypes.NameIdentifier, "NameId", null, "https://idp.example.com"),
+                    new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, ",,,,NameId", null, "https://idp.example.com"),
                     new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, "https://idp.example.com")
                 }, "Federation"));
 
@@ -360,10 +395,10 @@ namespace Kentor.AuthServices.Tests.Owin
             };
             var requestUri = Saml2Binding.Get(Saml2BindingType.HttpRedirect).Bind(response).Location;
 
-            var cookieData = HttpRequestData.EscapeBase64CookieValue(
-                Convert.ToBase64String(
+            var cookieData = HttpRequestData.ConvertBinaryData(
                     options.DataProtector.Protect(
-                        Encoding.UTF8.GetBytes("http://loggedout.example.com/"))));
+                        new StoredRequestState(null, new Uri("http://loggedout.example.com/"), null, null)
+                            .Serialize()));
             context.Request.Headers["Cookie"] = $"Kentor.{relayState}={cookieData}";
             context.Request.Path = new PathString(requestUri.AbsolutePath);
             context.Request.QueryString = new QueryString(requestUri.Query.TrimStart('?'));
@@ -412,6 +447,44 @@ namespace Kentor.AuthServices.Tests.Owin
             context.Authentication.AuthenticationResponseRevoke.Should().NotBeNull();
             context.Authentication.AuthenticationResponseRevoke.AuthenticationTypes
                 .Should().BeEmpty();
+        }
+
+        [TestMethod]
+        public async Task KentorAuthServicesAuthenticationMiddleware_LogoutRequest_HonorsCommandResultHandled()
+        {
+            var options = new KentorAuthServicesAuthenticationOptions(true)
+            {
+                Notifications = new KentorAuthServicesNotifications
+                {
+                    LogoutCommandResultCreated = cr =>
+                    {
+                        cr.HandledResult = true;
+                    }
+                }
+            };
+
+            var subject = new KentorAuthServicesAuthenticationMiddleware(null, CreateAppBuilder(), options);
+
+            var context = OwinTestHelpers.CreateOwinContext();
+
+            var request = new Saml2LogoutRequest()
+            {
+                SessionIndex = "SessionId",
+                DestinationUrl = new Uri("http://sp.example.com/AuthServices/Logout"),
+                NameId = new Saml2NameIdentifier("NameId"),
+                Issuer = new EntityId("https://idp.example.com"),
+                SigningCertificate = SignedXmlHelper.TestCert
+            };
+
+            var url = Saml2Binding.Get(Saml2BindingType.HttpRedirect)
+                .Bind(request).Location;
+
+            context.Request.Path = new PathString(url.AbsolutePath);
+            context.Request.QueryString = new QueryString(url.Query.TrimStart('?'));
+
+            await subject.Invoke(context);
+
+            context.Response.StatusCode.Should().Be(200);
         }
 
         [TestMethod]
@@ -524,22 +597,22 @@ namespace Kentor.AuthServices.Tests.Owin
         {
             var returnUrl = "http://sp.example.com/returnurl";
 
-            var middleware = new KentorAuthServicesAuthenticationMiddleware(
+            var options = new KentorAuthServicesAuthenticationOptions(true);
+            var subject = new KentorAuthServicesAuthenticationMiddleware(
                 new StubOwinMiddleware(401, new AuthenticationResponseChallenge(
                     new string[] { "KentorAuthServices" }, new AuthenticationProperties()
                     {
                         RedirectUri = returnUrl
                     })),
-                    CreateAppBuilder(), new KentorAuthServicesAuthenticationOptions(true));
+                    CreateAppBuilder(), options);
 
             var context = OwinTestHelpers.CreateOwinContext();
 
-            await middleware.Invoke(context);
+            await subject.Invoke(context);
 
-            StoredRequestState storedAuthnData;
-            PendingAuthnRequests.TryRemove(ExtractRelayState(context), out storedAuthnData);
+            var storedState = ExtractRequestState(options.DataProtector, context);
 
-            storedAuthnData.ReturnUrl.Should().Be(returnUrl);
+            storedState.ReturnUrl.Should().Be(returnUrl);
         }
 
         [TestMethod]
@@ -553,25 +626,25 @@ namespace Kentor.AuthServices.Tests.Owin
             };
             prop.Dictionary["test"] = "SomeValue";
 
+            var options = new KentorAuthServicesAuthenticationOptions(true);
             var middleware = new KentorAuthServicesAuthenticationMiddleware(
-                new StubOwinMiddleware(401, new AuthenticationResponseChallenge(
-                    new string[] { "KentorAuthServices" }, prop)),
-                    CreateAppBuilder(), new KentorAuthServicesAuthenticationOptions(true));
+                new StubOwinMiddleware(401,
+                    new AuthenticationResponseChallenge(
+                        new string[] { "KentorAuthServices" }, prop)),
+                CreateAppBuilder(),
+                options);
 
             var context = OwinTestHelpers.CreateOwinContext();
 
             await middleware.Invoke(context);
 
-            var relayState = ExtractRelayState(context);
+            var storedAuthnData = ExtractRequestState(options.DataProtector, context);
 
-            StoredRequestState storedAuthnData;
-            PendingAuthnRequests.TryRemove(relayState, out storedAuthnData);
-
-            ((AuthenticationProperties)storedAuthnData.RelayData).Dictionary["test"].Should().Be("SomeValue");
+            new AuthenticationProperties(storedAuthnData.RelayData).Dictionary["test"].Should().Be("SomeValue");
         }
 
         [TestMethod]
-        public async Task KentorAuthServicesAuthenticationMiddleware_UsesCommandResultLocation()
+        public async Task KentorAuthServicesAuthenticationMiddleware_AcsUsesCommandResultLocation()
         {
             // For Owin middleware, the redirect uri is part of the
             // authentication properties, but we don't want to use it as it
@@ -625,7 +698,7 @@ namespace Kentor.AuthServices.Tests.Owin
 
             await middleware.Invoke(context);
 
-            context.Response.StatusCode.Should().Be(302);
+            context.Response.StatusCode.Should().Be(303);
             context.Response.Headers["Location"].Should().Be("http://localhost/LoggedIn");
         }
 
@@ -635,23 +708,31 @@ namespace Kentor.AuthServices.Tests.Owin
             var context = OwinTestHelpers.CreateOwinContext();
             context.Request.Method = "POST";
 
+            var authProps = new AuthenticationProperties()
+            {
+                IssuedUtc = new DateTime(1975, 05, 05, 05, 05, 05, DateTimeKind.Utc)
+            };
+            authProps.Dictionary["Test"] = "TestValue";
+
             var state = new StoredRequestState(new EntityId("https://idp.example.com"),
                 new Uri("http://localhost/LoggedIn"),
-                new Saml2Id(MethodBase.GetCurrentMethod().Name + "RequestID"),
-                new AuthenticationProperties());
-
-            ((AuthenticationProperties)state.RelayData).RedirectUri = state.ReturnUrl.OriginalString;
-            ((AuthenticationProperties)state.RelayData).Dictionary["Test"] = "TestValue";
+                new Saml2Id("InResponseToId"),
+                authProps.Dictionary);
 
             var relayState = SecureKeyGenerator.CreateRelayState();
 
-            PendingAuthnRequests.Add(relayState, state);
+            var cookieData = HttpRequestData.ConvertBinaryData(
+                CreateAppBuilder().CreateDataProtector(
+                    typeof(KentorAuthServicesAuthenticationMiddleware).FullName)
+                    .Protect(state.Serialize()));
+
+            context.Request.Headers["Cookie"] = $"Kentor.{relayState}={cookieData}";
 
             var response =
             @"<saml2p:Response xmlns:saml2p=""urn:oasis:names:tc:SAML:2.0:protocol""
                 xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion""
                 ID = """ + MethodBase.GetCurrentMethod().Name + @""" Version=""2.0""
-                IssueInstant=""2013-01-01T00:00:00Z"" InResponseTo=""" + MethodBase.GetCurrentMethod().Name + @"RequestID"" >
+                IssueInstant=""2013-01-01T00:00:00Z"" InResponseTo=""InResponseToId"" >
                 <saml2:Issuer>
                     https://idp.example.com
                 </saml2:Issuer>
@@ -690,22 +771,146 @@ namespace Kentor.AuthServices.Tests.Owin
             ids[1].AddClaim(new Claim(ClaimTypes.Role, "RoleFromClaimsAuthManager", 
                 null, "ClaimsAuthenticationManagerStub"));
 
-            var middleware = new KentorAuthServicesAuthenticationMiddleware(null, CreateAppBuilder(),
+            var subject = new KentorAuthServicesAuthenticationMiddleware(null, CreateAppBuilder(),
                 StubFactory.CreateOwinOptions());
 
-            await middleware.Invoke(context);
+            await subject.Invoke(context);
 
-            context.Response.StatusCode.Should().Be(302);
+            context.Response.StatusCode.Should().Be(303);
             context.Response.Headers["Location"].Should().Be("http://localhost/LoggedIn");
+            context.Response.Headers["Set-Cookie"].Should().Be($"Kentor.{relayState}=; path=/; expires=Thu, 01-Jan-1970 00:00:00 GMT");
 
             context.Authentication.AuthenticationResponseGrant.Principal.Identities
                 .ShouldBeEquivalentTo(ids, opt => opt.IgnoringCyclicReferences());
 
             context.Authentication.AuthenticationResponseGrant.Properties.RedirectUri
-                .Should().Be("http://localhost/LoggedIn");
+                .Should().Be("http://localhost/LoggedIn", 
+                "the StoredRequestState.ReturnUrl should overtake the value in the AuthProperties and be stored in the AuthProps");
 
             context.Authentication.AuthenticationResponseGrant.Properties.Dictionary["Test"]
                 .Should().Be("TestValue");
+
+            context.Authentication.AuthenticationResponseGrant.Properties.IssuedUtc
+                .Should().Be(authProps.IssuedUtc);
+
+            context.Authentication.AuthenticationResponseGrant.Properties.AllowRefresh.Should().NotHaveValue("AllowRefresh should not be specified if no SessionOnOrAfter is specified");
+            context.Authentication.AuthenticationResponseGrant.Properties.ExpiresUtc.Should().NotHaveValue("ExpiresUtc should not be set if no SessionNotOnOrAfter is specified");
+        }
+
+        [TestMethod]
+        public async Task KentorAuthServicesAuthenticationMiddleware_Acs_HonorsCommandResultHandled()
+        {
+            var context = OwinTestHelpers.CreateOwinContext();
+            context.Request.Method = "POST";
+
+            var response =
+            @"<saml2p:Response xmlns:saml2p=""urn:oasis:names:tc:SAML:2.0:protocol""
+                xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion""
+                ID = """ + MethodBase.GetCurrentMethod().Name + @""" Version=""2.0""
+                IssueInstant=""2013-01-01T00:00:00Z"">
+                <saml2:Issuer>
+                    https://idp.example.com
+                </saml2:Issuer>
+                <saml2p:Status>
+                    <saml2p:StatusCode Value=""urn:oasis:names:tc:SAML:2.0:status:Success"" />
+                </saml2p:Status>
+                <saml2:Assertion
+                Version=""2.0"" ID=""" + MethodBase.GetCurrentMethod().Name + @"_Assertion1""
+                IssueInstant=""2013-09-25T00:00:00Z"">
+                    <saml2:Issuer>https://idp.example.com</saml2:Issuer>
+                    <saml2:Subject>
+                        <saml2:NameID>SomeUser</saml2:NameID>
+                        <saml2:SubjectConfirmation Method=""urn:oasis:names:tc:SAML:2.0:cm:bearer"" />
+                    </saml2:Subject>
+                    <saml2:Conditions NotOnOrAfter=""2100-01-01T00:00:00Z"" />
+                </saml2:Assertion>
+            </saml2p:Response>";
+
+            var bodyData = new KeyValuePair<string, string>[] {
+                new KeyValuePair<string, string>("SAMLResponse",
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes(SignedXmlHelper.SignXml(response)))),
+            };
+
+            var encodedBodyData = new FormUrlEncodedContent(bodyData);
+
+            context.Request.Body = encodedBodyData.ReadAsStreamAsync().Result;
+            context.Request.ContentType = encodedBodyData.Headers.ContentType.ToString();
+            context.Request.Host = new HostString("localhost");
+            context.Request.Path = new PathString("/AuthServices/Acs");
+
+            var options = StubFactory.CreateOwinOptions();
+            options.Notifications.AcsCommandResultCreated = (cr, r) =>
+            {
+                cr.HandledResult = true;
+            };
+
+            var subject = new KentorAuthServicesAuthenticationMiddleware(
+                null, CreateAppBuilder(), options);
+
+            await subject.Invoke(context);
+
+            context.Response.StatusCode.Should().Be(200);
+        }
+
+        [TestMethod]
+        public async Task KentorAuthServicesAuthenticationMiddleware_Acs_HonorsSessionNotOnOrAfter()
+        {
+            var context = OwinTestHelpers.CreateOwinContext();
+            context.Request.Method = "POST";
+
+            var response =
+            @"<saml2p:Response xmlns:saml2p=""urn:oasis:names:tc:SAML:2.0:protocol""
+                xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion""
+                ID = """ + MethodBase.GetCurrentMethod().Name + @""" Version=""2.0""
+                IssueInstant=""2013-01-01T00:00:00Z"">
+                <saml2:Issuer>
+                    https://idp.example.com
+                </saml2:Issuer>
+                <saml2p:Status>
+                    <saml2p:StatusCode Value=""urn:oasis:names:tc:SAML:2.0:status:Success"" />
+                </saml2p:Status>
+                <saml2:Assertion
+                Version=""2.0"" ID=""" + MethodBase.GetCurrentMethod().Name + $@"_Assertion1""
+                IssueInstant=""2013-09-25T00:00:00Z"">
+                    <saml2:Issuer>https://idp.example.com</saml2:Issuer>
+                    <saml2:Subject>
+                        <saml2:NameID>SomeUser</saml2:NameID>
+                        <saml2:SubjectConfirmation Method=""urn:oasis:names:tc:SAML:2.0:cm:bearer"" />
+                    </saml2:Subject>
+                    <saml2:Conditions NotOnOrAfter=""2100-01-01T00:00:00Z"" />
+                    <saml2:AuthnStatement AuthnInstant=""{DateTime.UtcNow.ToSaml2DateTimeString()}"" SessionNotOnOrAfter=""2050-01-01T00:00:00Z"">
+                        <saml2:AuthnContext>
+                            <saml2:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml2:AuthnContextClassRef>
+                        </saml2:AuthnContext>
+                    </saml2:AuthnStatement>
+                </saml2:Assertion>
+            </saml2p:Response>";
+
+            var bodyData = new KeyValuePair<string, string>[] {
+                new KeyValuePair<string, string>("SAMLResponse",
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes(SignedXmlHelper.SignXml(response)))),
+            };
+
+            var encodedBodyData = new FormUrlEncodedContent(bodyData);
+
+            context.Request.Body = encodedBodyData.ReadAsStreamAsync().Result;
+            context.Request.ContentType = encodedBodyData.Headers.ContentType.ToString();
+            context.Request.Host = new HostString("localhost");
+            context.Request.Path = new PathString("/AuthServices/Acs");
+
+            var options = StubFactory.CreateOwinOptions();
+
+            var subject = new KentorAuthServicesAuthenticationMiddleware(
+                null, CreateAppBuilder(), options);
+
+            await subject.Invoke(context);
+
+            context.Authentication.AuthenticationResponseGrant.Properties
+                .AllowRefresh.Should().BeFalse("AllowRefresh should be false if SessionNotOnOrAfter is specified");
+            context.Authentication.AuthenticationResponseGrant.Properties
+                .ExpiresUtc.Should().BeCloseTo(
+                new DateTimeOffset(2050, 1, 1, 0, 0, 0, new TimeSpan(0)),
+                because: "SessionNotOnOrAfter should be honored.");
         }
 
         [TestMethod]
@@ -739,8 +944,9 @@ namespace Kentor.AuthServices.Tests.Owin
             context.Request.Path = new PathString(signinPath);
             context.Request.QueryString = new QueryString("ReturnUrl=%2FHome&idp=https%3A%2F%2Fidp2.example.com");
 
-            var middleware = new KentorAuthServicesAuthenticationMiddleware(null, CreateAppBuilder(),
-                new KentorAuthServicesAuthenticationOptions(true));
+            var options = new KentorAuthServicesAuthenticationOptions(true);
+            var middleware = new KentorAuthServicesAuthenticationMiddleware(
+                null, CreateAppBuilder(), options);
 
             await middleware.Invoke(context);
 
@@ -749,10 +955,9 @@ namespace Kentor.AuthServices.Tests.Owin
 
             var relayState = ExtractRelayState(context);
 
-            StoredRequestState storedAuthnData;
-            PendingAuthnRequests.TryRemove(relayState, out storedAuthnData);
+            var storedAuthnData = ExtractRequestState(options.DataProtector, context);
 
-            storedAuthnData.ReturnUrl.Should().Be("http://localhost/Home");
+            storedAuthnData.ReturnUrl.Should().Be("/Home");
         }
 
         [TestMethod]
@@ -783,16 +988,22 @@ namespace Kentor.AuthServices.Tests.Owin
 
             string[] specifiedAuthTypes = null;
 
+            string logoutInfoClaimValue = ",,urn:format,,Saml2NameId";
+
+            // Emulate the external cookie middleware.
             context.Set<AuthenticateDelegate>("security.Authenticate",
                 (authTypes, callback, state) =>
                 {
                     specifiedAuthTypes = authTypes;
-                    var originalNameIdClaim = new Claim(ClaimTypes.NameIdentifier, "Saml2NameId", null, "http://idp.example.com");
-                    originalNameIdClaim.Properties[ClaimProperties.SamlNameIdentifierFormat] = "urn:format";
+                    var logoutInfoClaim = new Claim(
+                        AuthServicesClaimTypes.LogoutNameIdentifier,
+                        logoutInfoClaimValue,
+                        null,
+                        "http://idp.example.com");
 
                     callback(new ClaimsIdentity(new Claim[]
                         {
-                            originalNameIdClaim,
+                            logoutInfoClaim,
                             new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, "http://idp.example.com"),
                             new Claim(ClaimTypes.Role, "SomeRole", null, "http://idp.example.com")
                         }, "Federation"),
@@ -818,15 +1029,12 @@ namespace Kentor.AuthServices.Tests.Owin
             specifiedAuthTypes.Should().HaveCount(1)
                 .And.Subject.Single().Should().Be(DefaultSignInAsAuthenticationType);
 
-            var expectedLogoutNameIdClaim = new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, "Saml2NameId", null, "http://idp.example.com");
-            expectedLogoutNameIdClaim.Properties[ClaimProperties.SamlNameIdentifierFormat] = "urn:format";
-
             var expected = new ClaimsIdentity(new Claim[]
             {
                 new Claim(ClaimTypes.NameIdentifier, "ApplicationNameId"),
                 new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, "http://idp.example.com"),
-                expectedLogoutNameIdClaim
-            }, "ApplicationIdentity");
+                new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, logoutInfoClaimValue, null, "http://idp.example.com")
+        }, "ApplicationIdentity");
 
             context.Authentication.AuthenticationResponseGrant.Identity
                 .ShouldBeEquivalentTo(expected, opt => opt.IgnoringCyclicReferences());

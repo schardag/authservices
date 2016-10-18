@@ -31,15 +31,15 @@ namespace Kentor.AuthServices
         /// <param name="spOptions">Service provider options to use when 
         /// creating AuthnRequests for this Idp.</param>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1704:IdentifiersShouldBeSpelledCorrectly", MessageId = "sp")]
-        public IdentityProvider(EntityId entityId, ISPOptions spOptions)
+        public IdentityProvider(EntityId entityId, SPOptions spOptions)
         {
             EntityId = entityId;
             this.spOptions = spOptions;
         }
 
-        readonly ISPOptions spOptions;
+        readonly SPOptions spOptions;
 
-        internal IdentityProvider(IdentityProviderElement config, ISPOptions spOptions)
+        internal IdentityProvider(IdentityProviderElement config, SPOptions spOptions)
         {
             singleSignOnServiceUrl = config.SignOnUrl;
             SingleLogoutServiceUrl = config.LogoutUrl;
@@ -49,6 +49,7 @@ namespace Kentor.AuthServices
             metadataLocation = string.IsNullOrEmpty(config.MetadataLocation)
                 ? null : config.MetadataLocation;
             WantAuthnRequestsSigned = config.WantAuthnRequestsSigned;
+            DisableOutboundLogoutRequests = config.DisableOutboundLogoutRequests;
 
             var certificate = config.SigningCertificate.LoadCertificate();
             if (certificate != null)
@@ -63,8 +64,8 @@ namespace Kentor.AuthServices
             }
 
             // If configured to load metadata, this will immediately do the load.
-            LoadMetadata = config.LoadMetadata;
             this.spOptions = spOptions;
+            LoadMetadata = config.LoadMetadata;
 
             // Validate if values are only from config. If metadata is loaded, validation
             // is done on metadata load.
@@ -95,9 +96,9 @@ namespace Kentor.AuthServices
         private bool loadMetadata;
 
         /// <summary>
-        /// Should this idp load metadata? If you intend to set the
-        /// <see cref="MetadataLocation"/> that must be done before setting
-        /// LoadMetadata to true.</summary>
+        /// Should this idp load metadata? The metadata is loaded immediately
+        /// when the property is set to true, so the <see cref="MetadataLocation"/>
+        /// must be correct before settingLoadMetadata to true.</summary>
         public bool LoadMetadata
         {
             get
@@ -268,34 +269,13 @@ namespace Kentor.AuthServices
         /// <summary>
         /// Create an authenticate request aimed for this idp.
         /// </summary>
-        /// <param name="returnUrl">The return url where the browser should be sent after
-        /// successful authentication.</param>
         /// <param name="authServicesUrls">Urls for AuthServices, used to populate fields
         /// in the created AuthnRequest</param>
-        /// <returns>AuthnRequest</returns>
-        public Saml2AuthenticationRequest CreateAuthenticateRequest(
-            Uri returnUrl,
-            AuthServicesUrls authServicesUrls)
-        {
-            return CreateAuthenticateRequest(returnUrl, authServicesUrls, null);
-        }
-
-        /// <summary>
-        /// Create an authenticate request aimed for this idp.
-        /// </summary>
-        /// <param name="returnUrl">The return url where the browser should be sent after
-        /// successful authentication.</param>
-        /// <param name="authServicesUrls">Urls for AuthServices, used to populate fields
-        /// in the created AuthnRequest</param>
-        /// <param name="relayData">Aux data that should be preserved across the authentication</param>
-        /// <returns>AuthnRequest</returns>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "AuthenticateRequestSigningBehavior")]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "ServiceCertificates")]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "AuthenticateRequests")]
         public Saml2AuthenticationRequest CreateAuthenticateRequest(
-            Uri returnUrl,
-            AuthServicesUrls authServicesUrls,
-            object relayData)
+            AuthServicesUrls authServicesUrls)
         {
             if (authServicesUrls == null)
             {
@@ -328,10 +308,6 @@ namespace Kentor.AuthServices
 
                 authnRequest.SigningCertificate = spOptions.SigningServiceCertificate;
             }
-
-            var requestState = new StoredRequestState(EntityId, returnUrl, authnRequest.Id, relayData);
-
-            PendingAuthnRequests.Add(authnRequest.RelayState, requestState);
 
             return authnRequest;
         }
@@ -370,7 +346,9 @@ namespace Kentor.AuthServices
             {
                 try
                 {
-                    var metadata = MetadataLoader.LoadIdp(MetadataLocation);
+                    var metadata = MetadataLoader.LoadIdp(
+                        MetadataLocation,
+                        spOptions.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata);
 
                     ReadMetadata(metadata);
                 }
@@ -505,8 +483,9 @@ namespace Kentor.AuthServices
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "ServiceCertificates")]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "ISPOptions")]
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1726:UsePreferredTerms", MessageId = "Logout")]
-        public Saml2LogoutRequest CreateLogoutRequest()
+        public Saml2LogoutRequest CreateLogoutRequest(ClaimsPrincipal user)
         {
+            if (user == null) throw new ArgumentNullException(nameof(user));
             if (spOptions.SigningServiceCertificate == null)
             {
                 throw new InvalidOperationException(string.Format(CultureInfo.InvariantCulture,
@@ -518,13 +497,21 @@ namespace Kentor.AuthServices
             {
                 DestinationUrl = SingleLogoutServiceUrl,
                 Issuer = spOptions.EntityId,
-                NameId = (ClaimsPrincipal.Current.FindFirst(AuthServicesClaimTypes.LogoutNameIdentifier)
-                            ?? ClaimsPrincipal.Current.FindFirst(ClaimTypes.NameIdentifier))
+                NameId = user.FindFirst(AuthServicesClaimTypes.LogoutNameIdentifier)
                             .ToSaml2NameIdentifier(),
                 SessionIndex =
-                    ClaimsPrincipal.Current.FindFirst(AuthServicesClaimTypes.SessionIndex).Value,
+                    user.FindFirst(AuthServicesClaimTypes.SessionIndex).Value,
                 SigningCertificate = spOptions.SigningServiceCertificate,
             };
         }
+
+        /// <summary>
+        /// Disable outbound logout requests to this idp, even though
+        /// AuthServices is configured for single logout and the idp supports
+        /// it. This setting might be usable when adding SLO to an existing
+        /// setup, to ensure that everyone is ready for SLO before activating.
+        /// </summary>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1726:UsePreferredTerms", MessageId = "Logout")]
+        public bool DisableOutboundLogoutRequests { get; set; }
     }
 }

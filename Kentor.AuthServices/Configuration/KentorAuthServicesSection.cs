@@ -290,12 +290,12 @@ namespace Kentor.AuthServices.Configuration
         /// Certificates used by the service provider for signing and/or decryption.
         /// </summary>
         [ConfigurationProperty(serviceCertificates)]
-        [ConfigurationCollection(typeof(ServiceCertificateCollection))]
-        public ServiceCertificateCollection ServiceCertificates
+        [ConfigurationCollection(typeof(ServiceCertificateElementCollection))]
+        public ServiceCertificateElementCollection ServiceCertificates
         {
             get
             {
-                return (ServiceCertificateCollection)base[serviceCertificates];
+                return (ServiceCertificateElementCollection)base[serviceCertificates];
             }
         }
 
@@ -333,6 +333,21 @@ namespace Kentor.AuthServices.Configuration
             internal set
             {
                 base[validateCertificates] = value;
+            }
+        }
+
+        const string compatibility = nameof(compatibility);
+
+        /// <summary>
+        /// Compatibility settings. Can be used to make AuthServices accept
+        /// certain non-standard behaviour.
+        /// </summary>
+        [ConfigurationProperty(compatibility)]
+        public CompatibilityElement Compatibility 
+        {
+            get
+            {
+                return (CompatibilityElement)base[compatibility];
             }
         }
     }

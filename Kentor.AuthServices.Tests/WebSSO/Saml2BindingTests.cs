@@ -115,12 +115,14 @@ namespace Kentor.AuthServices.Tests.WebSso
             Saml2Binding.Get(r).Should().BeNull();
         }
 
-        class ConcreteSaml2Binding : Saml2Binding
+        [TestMethod]
+        public void Saml2Binding_Get_ExplanatoryExceptionOnUnknownBinding()
         {
-            protected internal override bool CanUnbind(HttpRequestData request)
-            {
-                throw new NotImplementedException();
-            }
+            Action a = () => Saml2Binding.Get((Saml2BindingType)1473);
+
+            a.ShouldThrow<ArgumentException>()
+                .WithMessage("1473 is not a valid value for the Saml2BindingType enum. Have you forgotten to configure a binding for your identity provider?")
+                .WithInnerException<KeyNotFoundException>();
         }
 
         [TestMethod]
@@ -128,7 +130,7 @@ namespace Kentor.AuthServices.Tests.WebSso
         {
             var message = new Saml2MessageImplementation();
 
-            Action a = () => new ConcreteSaml2Binding().Bind(message);
+            Action a = () => new StubSaml2Binding().Bind(message);
 
             a.ShouldThrow<NotImplementedException>();
         }
@@ -136,8 +138,16 @@ namespace Kentor.AuthServices.Tests.WebSso
         [TestMethod]
         public void Saml2Binding_Bind_ThrowsNotImplementedException()
         {
-            new ConcreteSaml2Binding().Invoking(b => b.Bind(null))
+            new StubSaml2Binding().Invoking(b => b.Bind(null))
                 .ShouldThrow<NotImplementedException>();
+        }
+
+        class ConcreteSaml2Binding : Saml2Binding
+        {
+            protected internal override bool CanUnbind(HttpRequestData request)
+            {
+                throw new NotImplementedException();
+            }
         }
 
         [TestMethod]
@@ -176,6 +186,28 @@ namespace Kentor.AuthServices.Tests.WebSso
             Action a = () => Saml2Binding.UriToSaml2BindingType(null);
 
             a.ShouldThrow<ArgumentNullException>().And.ParamName.Should().Be("uri");
+        }
+
+        [TestMethod]
+        public void Saml2Binding_Saml2BindingTypeToUri_Artifact()
+        {
+            Saml2Binding.Saml2BindingTypeToUri(Saml2BindingType.Artifact)
+                .Should().Be(Saml2Binding.HttpArtifactUri);
+        }
+
+        [TestMethod]
+        public void Saml2Binding_Saml2BindingTypeToUri_Post()
+        {
+            Saml2Binding.Saml2BindingTypeToUri(Saml2BindingType.HttpPost)
+                .Should().Be(Saml2Binding.HttpPostUri);
+        }
+
+        [TestMethod]
+        public void Saml2Binding_Saml2BindingTypeToUri_Unknown()
+        {
+            Action a = () => Saml2Binding.Saml2BindingTypeToUri(Saml2BindingType.HttpRedirect);
+
+            a.ShouldThrow<ArgumentException>().And.Message.Should().Be("Unknown Saml2 Binding Type \"HttpRedirect\".");
         }
     }
 }

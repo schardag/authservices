@@ -19,6 +19,12 @@ namespace Kentor.AuthServices.Owin
     public class KentorAuthServicesAuthenticationOptions : AuthenticationOptions, IOptions
     {
         /// <summary>
+        /// Set of callbacks that can be used as extension points for various
+        /// events.
+        /// </summary>
+        public KentorAuthServicesNotifications Notifications { get; set; }
+
+        /// <summary>
         /// Constructor
         /// <param name="loadConfiguration">Should the options be inited by loading app/web.config?</param>
         /// </summary>
@@ -29,6 +35,7 @@ namespace Kentor.AuthServices.Owin
         {
             AuthenticationMode = AuthenticationMode.Active;
             Description.Caption = Constants.DefaultCaption;
+            Notifications = new KentorAuthServicesNotifications();
 
             if (loadConfiguration)
             {
@@ -48,7 +55,7 @@ namespace Kentor.AuthServices.Owin
         /// Options for the service provider's behaviour; i.e. everything except
         /// the idp and federation list.
         /// </summary>
-        public ISPOptions SPOptions { get; set; }
+        public SPOptions SPOptions { get; set; }
 
         private readonly IdentityProviderDictionary identityProviders = new IdentityProviderDictionary();
 

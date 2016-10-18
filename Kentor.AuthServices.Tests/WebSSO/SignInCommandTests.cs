@@ -1,22 +1,12 @@
 ﻿using System;
-using System.Configuration;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using FluentAssertions;
 using System.Net;
 using System.Web;
-using System.Linq;
-using NSubstitute;
-using System.IO.Compression;
-using System.IO;
-using System.Xml.Linq;
-using Kentor.AuthServices.Tests.Helpers;
 using Kentor.AuthServices.Configuration;
 using System.IdentityModel.Metadata;
-using System.Xml;
-using System.Xml.Schema;
-using Kentor.AuthServices.Internal;
 using Kentor.AuthServices.WebSso;
-using System.IdentityModel.Tokens;
+using System.Collections.Generic;
 
 namespace Kentor.AuthServices.Tests.WebSso
 {
@@ -26,20 +16,15 @@ namespace Kentor.AuthServices.Tests.WebSso
         [TestMethod]
         public void SignInCommand_Run_ReturnsAuthnRequestForDefaultIdp()
         {
-            var defaultDestination = Options.FromConfiguration.IdentityProviders.Default.SingleSignOnServiceUrl;
+            var idp = Options.FromConfiguration.IdentityProviders.Default;
+            var defaultDestination = idp.SingleSignOnServiceUrl;
 
             var result = new SignInCommand().Run(
                 new HttpRequestData("GET", new Uri("http://example.com")),
                 Options.FromConfiguration);
 
-            var expected = new CommandResult()
-            {
-                HttpStatusCode = HttpStatusCode.SeeOther,
-                Cacheability = (Cacheability) HttpCacheability.NoCache,
-                Location = new Uri(defaultDestination + "?SAMLRequest=XYZ")
-            };
-
-            result.ShouldBeEquivalentTo(expected, options => options.Excluding(cr => cr.Location));
+            result.HttpStatusCode.Should().Be(HttpStatusCode.SeeOther);
+            result.Cacheability.Should().Be((Cacheability)HttpCacheability.NoCache);
             result.Location.Host.Should().Be(defaultDestination.Host);
 
             var queries = HttpUtility.ParseQueryString(result.Location.Query);
@@ -56,15 +41,9 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             var httpRequest = new HttpRequestData("GET", new Uri("http://localhost/signin?ReturnUrl=%2FReturn.aspx"));
 
-            var subject = new SignInCommand().Run(httpRequest, Options.FromConfiguration);
+            var actual = new SignInCommand().Run(httpRequest, Options.FromConfiguration);
 
-            var idp = Options.FromConfiguration.IdentityProviders.Default;
-            var relayState = HttpUtility.ParseQueryString(subject.Location.Query)["RelayState"];
-
-            StoredRequestState storedAuthnData;
-            PendingAuthnRequests.TryRemove(relayState, out storedAuthnData);
-
-            storedAuthnData.ReturnUrl.Should().Be("http://localhost/Return.aspx");
+            actual.RequestState.ReturnUrl.Should().Be("/Return.aspx");
         }
 
         [TestMethod]
@@ -157,6 +136,98 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             a.ShouldThrow<ArgumentNullException>()
                 .And.ParamName.Should().Be("options");
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_Calls_Notifications()
+        {
+            var options = StubFactory.CreateOptions();
+            var idp = options.IdentityProviders.Default;
+            var relayData = new Dictionary<string, string>();
+            options.SPOptions.DiscoveryServiceUrl = null;
+           
+            var request = new HttpRequestData("GET",
+                new Uri("http://sp.example.com"));
+
+            var selectedIdpCalled = false;
+            options.Notifications.SelectIdentityProvider =
+                (ei, r) =>
+            {
+                ei.Should().BeSameAs(idp.EntityId);
+                r.Should().BeSameAs(relayData);
+                selectedIdpCalled = true;
+                return null;
+            };
+            
+            var authnRequestCreatedCalled = false;
+            options.Notifications.AuthenticationRequestCreated = (a, i, r) => 
+                {
+                    a.Should().NotBeNull();
+                    i.Should().BeSameAs(idp);
+                    r.Should().BeSameAs(relayData);
+                    authnRequestCreatedCalled = true;
+                };
+
+            CommandResult notifiedCommandResult = null;
+            options.Notifications.SignInCommandResultCreated = (cr, r) =>
+                {
+                    notifiedCommandResult = cr;
+                    r.Should().BeSameAs(relayData);                    
+                };
+
+            SignInCommand.Run(idp.EntityId, null, request, options, relayData)
+                .Should().BeSameAs(notifiedCommandResult);
+
+            authnRequestCreatedCalled.Should().BeTrue("the AuthenticationRequestCreated notification should have been called");
+            selectedIdpCalled.Should().BeTrue("the SelectIdentityProvider notification should have been called.");
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_Uses_IdpFromNotification()
+        {
+            var options = StubFactory.CreateOptions();
+            var idp = options.IdentityProviders.Default;
+            var entityId = new EntityId("urn:invalid");
+            options.SPOptions.DiscoveryServiceUrl.Should().NotBeNull("this test assumes a non-null DS url");
+
+            var request = new HttpRequestData("GET",
+                new Uri("http://sp.example.com"));
+
+            options.Notifications.SelectIdentityProvider = (ei, r) =>
+            {
+                return idp;
+            };
+
+            var authnRequestCreatedCalled = false;
+            options.Notifications.AuthenticationRequestCreated = (a, i, r) =>
+            {
+                authnRequestCreatedCalled = true;
+                i.Should().BeSameAs(idp, "the idp from the SelectIdentityProvider notification should override the default behaviour");
+            };
+
+            SignInCommand.Run(entityId, null, request, options, null);
+
+            authnRequestCreatedCalled.Should().BeTrue("an AuthenticateRequest should have been created instead of going to the Discovery Service.");
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_Calls_CommandResultCreated_OnRedirectToDS()
+        {
+            var options = StubFactory.CreateOptions();
+            var idp = options.IdentityProviders.Default;
+            options.SPOptions.DiscoveryServiceUrl.Should().NotBeNull("this test assumes a non-null DS url");
+
+            var request = new HttpRequestData("GET",
+                new Uri("http://sp.example.com"));
+
+            CommandResult notifiedCommandResult = null;
+            options.Notifications.SignInCommandResultCreated = (cr, r) =>
+            {
+                notifiedCommandResult = cr;
+            };
+
+            SignInCommand.Run(null, null, request, options, null)
+                .Should().BeSameAs(notifiedCommandResult);
         }
     }
 }

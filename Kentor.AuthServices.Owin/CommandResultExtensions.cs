@@ -33,6 +33,15 @@ namespace Kentor.AuthServices.Owin
                 context.Response.Headers["Location"] = commandResult.Location.OriginalString;
             }
 
+            if (commandResult.TerminateLocalSession)
+            {
+                context.Authentication.SignOut();
+            }
+
+            ApplyCookies(commandResult, context, dataProtector);
+
+            // Write the content last, it causes the headers to be flushed
+            // on some hosts.
             if (commandResult.Content != null)
             {
                 // Remove value set by other middleware and let the host calculate
@@ -40,24 +49,16 @@ namespace Kentor.AuthServices.Owin
                 context.Response.ContentLength = null;
                 context.Response.Write(commandResult.Content);
             }
-
-            if (commandResult.TerminateLocalSession)
-            {
-                context.Authentication.SignOut();
-            }
-
-            ApplyCookies(commandResult, context, dataProtector);
         }
 
         private static void ApplyCookies(CommandResult commandResult, IOwinContext context, IDataProtector dataProtector)
         {
-            if (!string.IsNullOrEmpty(commandResult.SetCookieData))
+            var serializedCookieData = commandResult.GetSerializedRequestState();
+
+            if (serializedCookieData != null)
             {
-                var protectedData = HttpRequestData.EscapeBase64CookieValue(
-                    Convert.ToBase64String(
-                        dataProtector.Protect(
-                            Encoding.UTF8.GetBytes(
-                                commandResult.SetCookieData))));
+                var protectedData = HttpRequestData.ConvertBinaryData(
+                        dataProtector.Protect(serializedCookieData));
 
                 context.Response.Cookies.Append(
                     commandResult.SetCookieName,
@@ -68,9 +69,19 @@ namespace Kentor.AuthServices.Owin
                     });
             }
 
-            if(!string.IsNullOrEmpty(commandResult.ClearCookieName))
+            commandResult.ApplyClearCookie(context);
+        }
+
+        public static void ApplyClearCookie(this CommandResult commandResult, IOwinContext context)
+        {
+            if (!string.IsNullOrEmpty(commandResult.ClearCookieName))
             {
-                context.Response.Cookies.Delete(commandResult.ClearCookieName);
+                context.Response.Cookies.Delete(
+                    commandResult.ClearCookieName,
+                    new CookieOptions
+                    {
+                        HttpOnly = true
+                    });
             }
         }
     }

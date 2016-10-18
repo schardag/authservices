@@ -48,7 +48,7 @@ namespace Kentor.AuthServices.Tests
         [TestMethod]
         public void IdentityProvider_CreateAuthenticateRequest_DestinationInXml()
         {
-            string idpUri = "http://idp.example.com/";
+            string idpUri = "https://idp.example.com:443/";
 
             var subject = new IdentityProvider(
                 new EntityId(idpUri),
@@ -57,7 +57,7 @@ namespace Kentor.AuthServices.Tests
                     SingleSignOnServiceUrl = new Uri(idpUri)
                 };
 
-            var r = subject.CreateAuthenticateRequest(null, StubFactory.CreateAuthServicesUrls());
+            var r = subject.CreateAuthenticateRequest(StubFactory.CreateAuthServicesUrls());
 
             r.ToXElement().Attribute("Destination").Should().NotBeNull()
                 .And.Subject.Value.Should().Be(idpUri);
@@ -71,7 +71,7 @@ namespace Kentor.AuthServices.Tests
             var idp = options.IdentityProviders.Default;
 
             var urls = StubFactory.CreateAuthServicesUrls();
-            var subject = idp.CreateAuthenticateRequest(null, urls);
+            var subject = idp.CreateAuthenticateRequest(urls);
 
             var expected = new Saml2AuthenticationRequest()
             {
@@ -101,7 +101,7 @@ namespace Kentor.AuthServices.Tests
             var idp = options.IdentityProviders.Default;
 
             var urls = StubFactory.CreateAuthServicesUrlsPublicOrigin(origin);
-            var subject = idp.CreateAuthenticateRequest(null, urls);
+            var subject = idp.CreateAuthenticateRequest(urls);
 
             var expected = new Saml2AuthenticationRequest()
             {
@@ -123,9 +123,9 @@ namespace Kentor.AuthServices.Tests
             var idp = options.IdentityProviders.Default;
             var urls = StubFactory.CreateAuthServicesUrls();
 
-            ((SPOptions)options.SPOptions).AttributeConsumingServices.Clear();
+            options.SPOptions.AttributeConsumingServices.Clear();
 
-            var subject = idp.CreateAuthenticateRequest(null, urls);
+            var subject = idp.CreateAuthenticateRequest(urls);
 
             var expected = new Saml2AuthenticationRequest()
             {
@@ -145,7 +145,7 @@ namespace Kentor.AuthServices.Tests
         {
             var idp = Options.FromConfiguration.IdentityProviders.Default;
 
-            Action a = () => idp.CreateAuthenticateRequest(new Uri("http://localhost"), null);
+            Action a = () => idp.CreateAuthenticateRequest(null);
 
             a.ShouldThrow<ArgumentNullException>().And.ParamName.Should().Be("authServicesUrls");
         }
@@ -154,7 +154,7 @@ namespace Kentor.AuthServices.Tests
         public void IdentityProvider_CreateAuthenticateRequest_IncludesSigningCertificate_ForConfigAlways()
         {
             var options = StubFactory.CreateOptions();
-            var spOptions = (SPOptions)options.SPOptions;
+            var spOptions = options.SPOptions;
             spOptions.AuthenticateRequestSigningBehavior = SigningBehavior.Always;
             spOptions.ServiceCertificates.Add(new ServiceCertificate
             {
@@ -164,7 +164,7 @@ namespace Kentor.AuthServices.Tests
             var idp = options.IdentityProviders.Default;
             var urls = StubFactory.CreateAuthServicesUrls();
 
-            var subject = idp.CreateAuthenticateRequest(null, urls);
+            var subject = idp.CreateAuthenticateRequest(urls);
 
             subject.SigningCertificate.Thumbprint.Should().Be(SignedXmlHelper.TestCert.Thumbprint);
         }
@@ -173,12 +173,12 @@ namespace Kentor.AuthServices.Tests
         public void IdentityProvider_CreateAuthenticateRequest_IncludesSigningCertificate_IfIdpWants()
         {
             var options = Options.FromConfiguration;
-            var spOptions = (SPOptions)options.SPOptions;
+            var spOptions = options.SPOptions;
 
             var subject = options.IdentityProviders[new EntityId("https://idp2.example.com")];
             var urls = StubFactory.CreateAuthServicesUrls();
 
-            var actual = subject.CreateAuthenticateRequest(null, urls).SigningCertificate;
+            var actual = subject.CreateAuthenticateRequest(urls).SigningCertificate;
 
             (actual?.Thumbprint).Should().Be(SignedXmlHelper.TestCert2.Thumbprint);
         }
@@ -187,7 +187,7 @@ namespace Kentor.AuthServices.Tests
         public void IdentityProvider_CreateAuthenticateRequest_SigningBehaviorNever_OverridesIdpWantsRequestsSigned()
         {
             var options = StubFactory.CreateOptions();
-            var spOptions = (SPOptions)options.SPOptions;
+            var spOptions = options.SPOptions;
             spOptions.AuthenticateRequestSigningBehavior = SigningBehavior.Never;
             spOptions.ServiceCertificates.Add(new ServiceCertificate
             {
@@ -200,7 +200,7 @@ namespace Kentor.AuthServices.Tests
             };
             var urls = StubFactory.CreateAuthServicesUrls();
 
-            var actual = subject.CreateAuthenticateRequest(null, urls).SigningCertificate;
+            var actual = subject.CreateAuthenticateRequest(urls).SigningCertificate;
 
             actual.Should().BeNull();
         }
@@ -209,13 +209,13 @@ namespace Kentor.AuthServices.Tests
         public void IdentityProvider_CreateAuthenticateRequest_ThrowsOnMissingSigningCertificate()
         {
             var options = StubFactory.CreateOptions();
-            var spOptions = (SPOptions)options.SPOptions;
+            var spOptions = options.SPOptions;
             spOptions.AuthenticateRequestSigningBehavior = SigningBehavior.Always;
 
             var idp = options.IdentityProviders.Default;
             var urls = StubFactory.CreateAuthServicesUrls();
 
-            idp.Invoking(i => i.CreateAuthenticateRequest(null, urls))
+            idp.Invoking(i => i.CreateAuthenticateRequest(urls))
                 .ShouldThrow<ConfigurationErrorsException>()
                 .WithMessage($"Idp \"https://idp.example.com\" is configured for signed AuthenticateRequests*");
         }
@@ -409,6 +409,17 @@ namespace Kentor.AuthServices.Tests
 
             subject.Binding.Should().Be(Saml2BindingType.HttpPost);
             subject.SingleLogoutServiceBinding.Should().Be(Saml2BindingType.HttpPost);
+        }
+
+        [TestMethod]
+        public void IdentityProvider_Ctor_DisableOutboundLogoutRequest()
+        {
+            var config = CreateConfig();
+            config.DisableOutboundLogoutRequests = true;
+
+            var subject = new IdentityProvider(config, StubFactory.CreateSPOptions());
+
+            subject.DisableOutboundLogoutRequests.Should().BeTrue();
         }
 
         [TestMethod]
@@ -747,7 +758,7 @@ namespace Kentor.AuthServices.Tests
             subject.SingleSignOnServiceUrl.Should().Be("http://wrong.entityid.example.com/acs");
             subject.WantAuthnRequestsSigned.Should().Be(true, "WantAuthnRequestsSigned should have been loaded from metadata");
 
-            Action a = () => subject.CreateAuthenticateRequest(null, StubFactory.CreateAuthServicesUrls());
+            Action a = () => subject.CreateAuthenticateRequest(StubFactory.CreateAuthServicesUrls());
             a.ShouldNotThrow();
         }
 
@@ -798,6 +809,36 @@ namespace Kentor.AuthServices.Tests
         }
 
         [TestMethod]
+        public void IdentityProvider_MetadataLocation_UnpacksEntitiesDescriptor_if_configured()
+        {
+            var spOptions = StubFactory.CreateSPOptions();
+            spOptions.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata = true;
+
+            var subject = new IdentityProvider(
+                new EntityId("http://idp.federation.example.com/metadata"),
+                spOptions);
+
+            Action a = () => subject.MetadataLocation = "~/Metadata/SingleIdpInEntitiesDescriptor.xml";
+
+            a.ShouldNotThrow();
+        }
+
+        [TestMethod]
+        public void IdentityProvider_MetadataLocation_ThrowsWhenEntitiesDescriptorFoundAndNotAllowedByConfig()
+        {
+            var spOptions = StubFactory.CreateSPOptions();
+            spOptions.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata.Should().BeFalse();
+
+            var subject = new IdentityProvider(
+                new EntityId("http://idp.example.com"),
+                spOptions);
+
+            Action a = () => subject.MetadataLocation = "~/Metadata/SingleIdpInEntitiesDescriptor.xml";
+
+            a.ShouldThrow<InvalidOperationException>();
+        }
+
+        [TestMethod]
         public void IdentityProvider_CreateLogoutRequest()
         {
             var options = StubFactory.CreateOptions();
@@ -808,13 +849,13 @@ namespace Kentor.AuthServices.Tests
 
             var subject = options.IdentityProviders[0];
 
-            var nameIdClaim = new Claim(ClaimTypes.NameIdentifier, "NameId", null, subject.EntityId.Id);
-            nameIdClaim.Properties[ClaimProperties.SamlNameIdentifierFormat] = "urn:nameIdFormat";
+            var logoutNameIdClaim = new Claim(
+                AuthServicesClaimTypes.LogoutNameIdentifier, ",,urn:nameIdFormat,,NameId", null, subject.EntityId.Id);
 
-            Thread.CurrentPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            var user = new ClaimsPrincipal(new ClaimsIdentity(
                 new Claim[]
                 {
-                    nameIdClaim,
+                    logoutNameIdClaim,
                     new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, subject.EntityId.Id)
                 }, "Federation"));
 
@@ -823,7 +864,7 @@ namespace Kentor.AuthServices.Tests
             // We're assuming that the creation does not take more than a
             // second, so two values will do.
             var beforeTime = DateTime.UtcNow.ToSaml2DateTimeString();
-            var actual = subject.CreateLogoutRequest();
+            var actual = subject.CreateLogoutRequest(user);
             var aftertime = DateTime.UtcNow.ToSaml2DateTimeString();
 
             actual.Issuer.Id.Should().Be(options.SPOptions.EntityId.Id);
@@ -840,7 +881,7 @@ namespace Kentor.AuthServices.Tests
         }
 
         [TestMethod]
-        public void IdentityProvider_CreateLogoutRequest_PrefersAuthServicesLogoutNameId()
+        public void IdentityProvider_CreateLogoutRequest_IgnoresThreadPrincipal()
         {
             var options = StubFactory.CreateOptions();
             options.SPOptions.ServiceCertificates.Add(new ServiceCertificate()
@@ -853,14 +894,22 @@ namespace Kentor.AuthServices.Tests
             Thread.CurrentPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
                 new Claim[]
                 {
-                    new Claim(ClaimTypes.NameIdentifier, "ApplicationNameId"),
-                    new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, "Saml2NameId", null, subject.EntityId.Id),
+                    new Claim(ClaimTypes.NameIdentifier, "ThreadNameId"),
+                    new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, "ThreadLogoutNameId", null, subject.EntityId.Id),
+                    new Claim(AuthServicesClaimTypes.SessionIndex, "ThreadSessionId", null, subject.EntityId.Id)
+                }, "Federation"));
+
+            var user = new ClaimsPrincipal(new ClaimsIdentity(
+                new Claim[]
+                {
+                    new Claim(AuthServicesClaimTypes.LogoutNameIdentifier, ",,,,Saml2NameId", null, subject.EntityId.Id),
                     new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, subject.EntityId.Id)
                 }, "Federation"));
 
-            var actual = subject.CreateLogoutRequest();
+            var actual = subject.CreateLogoutRequest(user);
 
             actual.NameId.Value.Should().Be("Saml2NameId");
+            actual.SessionIndex.Should().Be("SessionId");
         }
 
         [TestMethod]
@@ -869,16 +918,29 @@ namespace Kentor.AuthServices.Tests
             var options = StubFactory.CreateOptions();
             var subject = options.IdentityProviders[0];
 
-            Thread.CurrentPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            var user = new ClaimsPrincipal(new ClaimsIdentity(
                 new Claim[]
                 {
                     new Claim(ClaimTypes.NameIdentifier, "NameId", null, subject.EntityId.Id),
                     new Claim(AuthServicesClaimTypes.SessionIndex, "SessionId", null, subject.EntityId.Id)
                 }, "Federation"));
 
-            subject.Invoking(s => s.CreateLogoutRequest())
+            subject.Invoking(s => s.CreateLogoutRequest(user))
                 .ShouldThrow<InvalidOperationException>()
                 .And.Message.Should().Be($"Tried to issue single logout request to https://idp.example.com, but no signing certificate for the SP is configured and single logout requires signing. Add a certificate to the ISPOptions.ServiceCertificates collection, or to <serviceCertificates> element if you're using web.config.");
+        }
+
+        [TestMethod]
+        public void IdentityProvider_CreateLogoutRequest_UserNullCheck()
+        {
+            var options = StubFactory.CreateOptions();
+            var subject = options.IdentityProviders[0];
+
+            ClaimsPrincipal user = null;
+
+            subject.Invoking(s => s.CreateLogoutRequest(user))
+                .ShouldThrow<ArgumentNullException>()
+                .And.Message.Should().Be("Value cannot be null.\r\nParameter name: user");
         }
     }
 }

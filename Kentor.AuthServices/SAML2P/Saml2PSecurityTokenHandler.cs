@@ -27,7 +27,7 @@ namespace Kentor.AuthServices.Saml2P
         /// <param name="spOptions">Options for the service provider that
         /// this token handler should work with.</param>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1704:IdentifiersShouldBeSpelledCorrectly", MessageId = "sp")]
-        public Saml2PSecurityTokenHandler(ISPOptions spOptions)
+        public Saml2PSecurityTokenHandler(SPOptions spOptions)
         {
             if (spOptions == null)
             {
@@ -99,6 +99,20 @@ namespace Kentor.AuthServices.Saml2P
 
             if(statement.SessionIndex != null)
             {
+                var nameIdClaim = subject.FindFirst(ClaimTypes.NameIdentifier);
+
+                subject.AddClaim(
+                    new Claim(
+                        AuthServicesClaimTypes.LogoutNameIdentifier,
+                        DelimitedString.Join(
+                            nameIdClaim.Properties.GetValueOrEmpty(ClaimProperties.SamlNameIdentifierNameQualifier),                     
+                            nameIdClaim.Properties.GetValueOrEmpty(ClaimProperties.SamlNameIdentifierSPNameQualifier),
+                            nameIdClaim.Properties.GetValueOrEmpty(ClaimProperties.SamlNameIdentifierFormat),
+                            nameIdClaim.Properties.GetValueOrEmpty(ClaimProperties.SamlNameIdentifierSPProvidedId),
+                            nameIdClaim.Value),
+                        null,
+                        issuer));
+
                 subject.AddClaim(
                     new Claim(AuthServicesClaimTypes.SessionIndex, statement.SessionIndex, null, issuer));
             }
@@ -111,7 +125,7 @@ namespace Kentor.AuthServices.Saml2P
         /// </summary>
         /// <param name="spOptions">Sp Options with configuration</param>
         /// <returns>Configured or created audience restriction.</returns>
-        private static AudienceRestriction GetAudienceRestriction(ISPOptions spOptions)
+        private static AudienceRestriction GetAudienceRestriction(SPOptions spOptions)
         {
             var audienceRestriction = spOptions.SystemIdentityModelIdentityConfiguration.AudienceRestriction;
 

@@ -18,7 +18,7 @@ namespace Kentor.AuthServices.Configuration
     /// Options for the service provider's behaviour; i.e. everything except
     /// the idp and federation list.
     /// </summary>
-    public class SPOptions : ISPOptions
+    public class SPOptions
     {
         /// <summary>
         /// Ctor
@@ -27,6 +27,7 @@ namespace Kentor.AuthServices.Configuration
         {
             systemIdentityModelIdentityConfiguration = new IdentityConfiguration(false);
             MetadataCacheDuration = new TimeSpan(1, 0, 0);
+            Compatibility = new Compatibility();
         }
 
         /// <summary>
@@ -55,6 +56,7 @@ namespace Kentor.AuthServices.Configuration
             NameIdPolicy = new Saml2NameIdPolicy(
                 configSection.NameIdPolicyElement.AllowCreate, configSection.NameIdPolicyElement.Format);
             RequestedAuthnContext = new Saml2RequestedAuthnContext(configSection.RequestedAuthnContext);
+            Compatibility = new Compatibility(configSection.Compatibility);
 
             configSection.ServiceCertificates.RegisterServiceCertificates(this);
 
@@ -108,6 +110,10 @@ namespace Kentor.AuthServices.Configuration
                 }
 
                 return value;
+            }
+            set
+            {
+                saml2PSecurityTokenHandler = value; 
             }
         }
 
@@ -192,17 +198,6 @@ namespace Kentor.AuthServices.Configuration
         /// </summary>
         public Saml2RequestedAuthnContext RequestedAuthnContext { get; set; }
 
-        /// <summary>
-        /// Contacts for the SAML2 entity.
-        /// </summary>
-        IEnumerable<ContactPerson> ISPOptions.Contacts
-        {
-            get
-            {
-                return Contacts;
-            }
-        }
-
         readonly ICollection<ContactPerson> contacts = new List<ContactPerson>();
 
         /// <summary>
@@ -213,17 +208,6 @@ namespace Kentor.AuthServices.Configuration
             get
             {
                 return contacts;
-            }
-        }
-
-        /// <summary>
-        /// Collection of attribute consuming services for the service provider.
-        /// </summary>
-        IEnumerable<AttributeConsumingService> ISPOptions.AttributeConsumingServices
-        {
-            get
-            {
-                return AttributeConsumingServices;
             }
         }
 
@@ -253,12 +237,12 @@ namespace Kentor.AuthServices.Configuration
             }
         }
 
-        readonly ICollection<ServiceCertificate> serviceCertificates = new List<ServiceCertificate>();
+        readonly ServiceCertificateCollection serviceCertificates = new ServiceCertificateCollection();
 
         /// <summary>
         /// Certificates used by the service provider for signing or decryption.
         /// </summary>
-        public ICollection<ServiceCertificate> ServiceCertificates
+        public ServiceCertificateCollection ServiceCertificates
         {
             get
             {
@@ -382,5 +366,10 @@ namespace Kentor.AuthServices.Configuration
         /// </summary>
         public bool ValidateCertificates { get; set; }
 
+        /// <summary>
+        /// Compatibility settings. Can be used to make AuthServices accept
+        /// certain non-standard behaviour.
+        /// </summary>
+        public Compatibility Compatibility { get; set; }
     }
 }
